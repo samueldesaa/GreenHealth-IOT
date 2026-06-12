@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>GreenHealth - Monitoramento MQTT</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+  <style>
+    :root {
+      --bg-1: #061d2f;
+      --bg-2: #073b3a;
+      --green: #21d07a;
+      --green-soft: rgba(33, 208, 122, 0.22);
+      --blue: #35a7ff;
+      --blue-soft: rgba(53, 167, 255, 0.22);
+      --glass: rgba(255, 255, 255, 0.13);
+      --glass-strong: rgba(255, 255, 255, 0.2);
+      --glass-border: rgba(255, 255, 255, 0.28);
+      --text: #effff8;
+      --muted: rgba(239, 255, 248, 0.72);
+      --danger: #ff6b7a;
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--text);
+      padding: 24px;
+      overflow-x: hidden;
+      background:
+        radial-gradient(circle at 12% 18%, rgba(33, 208, 122, 0.35), transparent 32%),
+        radial-gradient(circle at 86% 10%, rgba(53, 167, 255, 0.38), transparent 30%),
+        radial-gradient(circle at 55% 90%, rgba(33, 208, 122, 0.22), transparent 34%),
+        linear-gradient(135deg, var(--bg-1), var(--bg-2));
+    }
+
+    body::before,
+    body::after {
+      content: "";
+      position: fixed;
+      width: 420px;
+      height: 420px;
+      border-radius: 999px;
+      filter: blur(14px);
+      opacity: 0.22;
+      pointer-events: none;
+      z-index: -1;
+    }
+
+    body::before {
+      left: -120px;
+      top: 120px;
+      background: linear-gradient(135deg, var(--green), transparent);
+    }
+
+    body::after {
+      right: -140px;
+      bottom: 40px;
+      background: linear-gradient(135deg, var(--blue), transparent);
+    }
+
+    .page {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+    }
+
+    .glass {
+      background: linear-gradient(145deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.08));
+      border: 1px solid var(--glass-border);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(22px) saturate(145%);
+      -webkit-backdrop-filter: blur(22px) saturate(145%);
+    }
+
+    header {
+      position: relative;
+      overflow: hidden;
+      padding: 30px;
+      border-radius: 30px;
+      margin-bottom: 22px;
+    }
+
+    header::before {
+      content: "";
+      position: absolute;
+      inset: -80px -120px auto auto;
+      width: 320px;
+      height: 320px;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(53, 167, 255, 0.45), transparent 68%);
+    }
+
+    .title-row {
+      position: relative;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    .brand h1 {
+      font-size: clamp(2rem, 5vw, 4rem);
+      letter-spacing: -0.06em;
+      line-height: 1;
+      margin-bottom: 12px;
+    }
+
+    .brand p {
+      color: var(--muted);
+      font-size: 1rem;
+      max-width: 650px;
+      line-height: 1.55;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      font-size: 0.9rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--danger);
+      box-shadow: 0 0 18px var(--danger);
+    }
+
+    .dot.online-dot {
+      background: var(--green);
+      box-shadow: 0 0 18px var(--green);
+    }
+
+    .status-area {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px;
+      border-radius: 24px;
+      margin-bottom: 22px;
+    }
+
+    .status-area p {
+      line-height: 1.7;
+      color: var(--muted);
+    }
+
+    .status {
+      font-weight: 800;
+      color: var(--danger);
+    }
+
+    .online {
+      color: var(--green);
+    }
+
+    .offline {
+      color: var(--danger);
+    }
+
+    button {
+      border: 1px solid rgba(255, 255, 255, 0.32);
+      background: linear-gradient(135deg, rgba(33, 208, 122, 0.78), rgba(53, 167, 255, 0.68));
+      color: white;
+      padding: 13px 18px;
+      border-radius: 16px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: 0.22s ease;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
+    }
+
+    button:hover {
+      transform: translateY(-2px) scale(1.01);
+      box-shadow: 0 18px 38px rgba(0, 0, 0, 0.28);
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    .card {
+      position: relative;
+      overflow: hidden;
+      padding: 18px;
+      border-radius: 24px;
+      min-height: 126px;
+      transition: 0.22s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-3px);
+    }
+
+    .card::after {
+      content: "";
+      position: absolute;
+      right: -44px;
+      top: -44px;
+      width: 112px;
+      height: 112px;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(33, 208, 122, 0.35), transparent 68%);
+    }
+
+    .card.blue::after {
+      background: radial-gradient(circle, rgba(53, 167, 255, 0.38), transparent 68%);
+    }
+
+    .card span {
+      position: relative;
+      z-index: 1;
+      display: block;
+      font-size: 0.86rem;
+      color: var(--muted);
+      margin-bottom: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .card strong {
+      position: relative;
+      z-index: 1;
+      display: block;
+      font-size: clamp(1.45rem, 3vw, 2.1rem);
+      color: #ffffff;
+      letter-spacing: -0.04em;
+      word-break: break-word;
+    }
+
+    .card small {
+      position: relative;
+      z-index: 1;
+      display: block;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
+    .chart-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 22px;
+    }
+
+    .chart-box {
+      padding: 20px;
+      border-radius: 28px;
+      overflow: hidden;
+    }
+
+    .chart-box h2 {
+      font-size: 1.12rem;
+      margin-bottom: 16px;
+      color: #ffffff;
+      letter-spacing: -0.02em;
+    }
+
+    canvas {
+      width: 100% !important;
+      max-height: 370px;
+    }
+
+    footer {
+      margin-top: 24px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .empty {
+      padding: 22px;
+      border-radius: 22px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    @media (max-width: 650px) {
+      body {
+        padding: 12px;
+      }
+
+      header,
+      .status-area,
+      .chart-box {
+        border-radius: 22px;
+      }
+
+      .status-area {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="page">
+    <header class="glass">
+      <div class="title-row">
+        <div class="brand">
+          <h1>GreenHealth</h1>
+          <p>Monitoramento de plantas em tempo real via MQTT, com leitura modular por planta, gráficos e visualização por tipo de sensor.</p>
+        </div>
+
+        <div class="pill" id="pillConexao">
+          <span class="dot" id="dotConexao"></span>
+          <span id="pillTexto">MQTT offline</span>
+        </div>
+      </div>
+    </header>
+
+    <section class="status-area glass">
+      <div>
+        <p>Status MQTT:
+          <span id="mqttStatus" class="status offline">Desconectado</span>
+        </p>
+        <p>Última atualização:
+          <span id="ultimaAtualizacao">Aguardando dados...</span>
+        </p>
+        <p>Plantas recebidas:
+          <span id="totalPlantas">0</span>
+        </p>
+      </div>
+
+      <button onclick="alternarVisualizacao()" id="btnVisualizacao">
+        Visualizar por planta
+      </button>
+    </section>
+
+    <section id="cards" class="cards"></section>
+
+    <main id="areaGraficos" class="chart-grid"></main>
+
+    <footer>
+      Recebendo dados das plantas pelo tópico MQTT: greenhealth/sensores/dados
+    </footer>
+  </div>
+
+  <script>
+    // ================= CONFIGURAÇÃO MQTT =================
+
+    const broker = "ws://broker.emqx.io:8083/mqtt";
+    const topico = "greenhealth/sensores/dados";
+
+    const clientId = "site_greenhealth_" + Math.random().toString(16).substring(2, 10);
+
+    const client = mqtt.connect(broker, {
+      clientId: clientId,
+      clean: true,
+      connectTimeout: 4000,
+      reconnectPeriod: 3000
+    });
+
+    // ================= CONTROLE DE DADOS =================
+
+    const limitePontos = 30;
+    let visualizacaoPorPlanta = false;
+    let graficos = [];
+
+    const dados = {
+      labels: [],
+      plantas: {},
+      temperatura: [],
+      umidade_ar: []
+    };
+
+    const ultimosValores = {
+      plantas: {},
+      temperatura: null,
+      umidade_ar: null
+    };
+
+    // ================= CONEXÃO MQTT =================
+
+    client.on("connect", () => {
+      atualizarStatusMqtt("Conectado", true);
+      client.subscribe(topico);
+    });
+
+    client.on("reconnect", () => {
+      atualizarStatusMqtt("Reconectando...", false);
+    });
+
+    client.on("error", (erro) => {
+      console.error("Erro MQTT:", erro);
+      atualizarStatusMqtt("Erro na conexão", false);
+    });
+
+    client.on("offline", () => {
+      atualizarStatusMqtt("Desconectado", false);
+    });
+
+    client.on("message", (topic, message) => {
+      try {
+        const payload = JSON.parse(message.toString());
+
+        adicionarDados(payload);
+        atualizarCards();
+        montarGraficos();
+        atualizarGraficos();
+      } catch (erro) {
+        console.error("Erro ao interpretar JSON:", erro);
+      }
+    });
+
+    function atualizarStatusMqtt(texto, conectado) {
+      const status = document.getElementById("mqttStatus");
+      const pillTexto = document.getElementById("pillTexto");
+      const dot = document.getElementById("dotConexao");
+
+      status.textContent = texto;
+      status.className = conectado ? "status online" : "status offline";
+      pillTexto.textContent = conectado ? "MQTT online" : "MQTT offline";
+      dot.className = conectado ? "dot online-dot" : "dot";
+    }
+
+    // ================= NORMALIZAÇÃO DO JSON =================
+
+    function converterLdrParaPorcentagem(valor) {
+      if (valor === null || valor === undefined) {
+        return null;
+      }
+
+      const leitura = Number(valor);
+
+      if (Number.isNaN(leitura)) {
+        return null;
+      }
+
+      const percentual = (leitura / 4095) * 100;
+
+      // Garante que o valor fique sempre entre 0% e 100%.
+      return Math.max(0, Math.min(100, percentual));
+    }
+
+    function obterPlantasDoPayload(payload) {
+      if (Array.isArray(payload.plantas)) {
+        return payload.plantas.map(planta => ({
+          planta: Number(planta.planta),
+          ldr: converterLdrParaPorcentagem(planta.ldr),
+          umidade_solo: planta.umidade_solo !== null && planta.umidade_solo !== undefined ? Number(planta.umidade_solo) : null
+        })).filter(planta => !Number.isNaN(planta.planta));
+      }
+
+      // Compatibilidade com o formato antigo: solo1, solo2, ldr1, ldr2...
+      const plantasAntigas = [];
+
+      for (let numero = 1; numero <= 10; numero++) {
+        const solo = payload[`solo${numero}`];
+        const ldr = payload[`ldr${numero}`];
+
+        if (solo !== undefined || ldr !== undefined) {
+          plantasAntigas.push({
+            planta: numero,
+            ldr: converterLdrParaPorcentagem(ldr),
+            umidade_solo: solo !== undefined ? Number(solo) : null
+          });
+        }
+      }
+
+      return plantasAntigas;
+    }
+
+    function garantirEstruturaPlanta(numero) {
+      if (!dados.plantas[numero]) {
+        dados.plantas[numero] = {
+          ldr: Array(dados.labels.length - 1).fill(null),
+          umidade_solo: Array(dados.labels.length - 1).fill(null)
+        };
+      }
+
+      if (!ultimosValores.plantas[numero]) {
+        ultimosValores.plantas[numero] = {
+          ldr: null,
+          umidade_solo: null
+        };
+      }
+    }
+
+    // ================= FUNÇÕES DE DADOS =================
+
+    function adicionarDados(payload) {
+      const horario = payload.data_hora || new Date().toLocaleTimeString();
+      const plantasRecebidas = obterPlantasDoPayload(payload);
+      const idsRecebidos = new Set(plantasRecebidas.map(planta => planta.planta));
+
+      dados.labels.push(horario);
+
+      Object.keys(dados.plantas).forEach(numero => {
+        if (!idsRecebidos.has(Number(numero))) {
+          dados.plantas[numero].ldr.push(null);
+          dados.plantas[numero].umidade_solo.push(null);
+        }
+      });
+
+      plantasRecebidas.forEach(planta => {
+        garantirEstruturaPlanta(planta.planta);
+
+        dados.plantas[planta.planta].ldr.push(planta.ldr);
+        dados.plantas[planta.planta].umidade_solo.push(planta.umidade_solo);
+
+        ultimosValores.plantas[planta.planta].ldr = planta.ldr;
+        ultimosValores.plantas[planta.planta].umidade_solo = planta.umidade_solo;
+      });
+
+      dados.temperatura.push(payload.temperatura !== null && payload.temperatura !== undefined ? Number(payload.temperatura) : null);
+      dados.umidade_ar.push(payload.umidade_ar !== null && payload.umidade_ar !== undefined ? Number(payload.umidade_ar) : null);
+
+      ultimosValores.temperatura = payload.temperatura !== null && payload.temperatura !== undefined ? Number(payload.temperatura) : null;
+      ultimosValores.umidade_ar = payload.umidade_ar !== null && payload.umidade_ar !== undefined ? Number(payload.umidade_ar) : null;
+
+      limitarHistorico();
+
+      document.getElementById("ultimaAtualizacao").textContent = horario;
+      document.getElementById("totalPlantas").textContent = Object.keys(ultimosValores.plantas).length;
+    }
+
+    function limitarHistorico() {
+      while (dados.labels.length > limitePontos) {
+        dados.labels.shift();
+        dados.temperatura.shift();
+        dados.umidade_ar.shift();
+
+        Object.values(dados.plantas).forEach(planta => {
+          planta.ldr.shift();
+          planta.umidade_solo.shift();
+        });
+      }
+    }
+
+    function atualizarCards() {
+      const areaCards = document.getElementById("cards");
+      const numeros = Object.keys(ultimosValores.plantas)
+        .map(Number)
+        .sort((a, b) => a - b);
+
+      let html = "";
+
+      numeros.forEach(numero => {
+        const planta = ultimosValores.plantas[numero];
+
+        html += `
+          <div class="card glass">
+            <span>Planta ${numero} • Umidade do solo</span>
+            <strong>${formatarValor(planta.umidade_solo)}</strong>
+            <small>Leitura analógica</small>
+          </div>
+
+          <div class="card glass blue">
+            <span>Planta ${numero} • Luminosidade LDR</span>
+            <strong>${formatarPorcentagem(planta.ldr)}</strong>
+            <small>Convertido de 0 a 4095 para 0 a 100%</small>
+          </div>
+        `;
+      });
+
+      html += `
+        <div class="card glass">
+          <span>Temperatura</span>
+          <strong>${ultimosValores.temperatura !== null ? ultimosValores.temperatura.toFixed(1) + " °C" : "--"}</strong>
+          <small>DHT22</small>
+        </div>
+
+        <div class="card glass blue">
+          <span>Umidade do ar</span>
+          <strong>${ultimosValores.umidade_ar !== null ? ultimosValores.umidade_ar.toFixed(1) + " %" : "--"}</strong>
+          <small>DHT22</small>
+        </div>
+      `;
+
+      if (numeros.length === 0) {
+        html = `
+          <div class="empty glass">
+            Aguardando o primeiro JSON do ESP32 no tópico greenhealth/sensores/dados...
+          </div>
+        ` + html;
+      }
+
+      areaCards.innerHTML = html;
+    }
+
+    function formatarValor(valor) {
+      return valor !== null && valor !== undefined && !Number.isNaN(valor) ? valor : "--";
+    }
+
+    function formatarPorcentagem(valor) {
+      return valor !== null && valor !== undefined && !Number.isNaN(valor) ? valor.toFixed(0) + " %" : "--";
+    }
+
+    // ================= FUNÇÕES DE VISUALIZAÇÃO =================
+
+    function alternarVisualizacao() {
+      visualizacaoPorPlanta = !visualizacaoPorPlanta;
+
+      const botao = document.getElementById("btnVisualizacao");
+      botao.textContent = visualizacaoPorPlanta ? "Visualizar por tipo de sensor" : "Visualizar por planta";
+
+      montarGraficos();
+    }
+
+    function limparGraficos() {
+      graficos.forEach(grafico => grafico.destroy());
+      graficos = [];
+      document.getElementById("areaGraficos").innerHTML = "";
+    }
+
+    function criarBoxGrafico(titulo, idCanvas) {
+      const area = document.getElementById("areaGraficos");
+
+      const box = document.createElement("div");
+      box.className = "chart-box glass";
+
+      const h2 = document.createElement("h2");
+      h2.textContent = titulo;
+
+      const canvas = document.createElement("canvas");
+      canvas.id = idCanvas;
+
+      box.appendChild(h2);
+      box.appendChild(canvas);
+      area.appendChild(box);
+    }
+
+    function montarGraficos() {
+      limparGraficos();
+
+      const numeros = Object.keys(dados.plantas)
+        .map(Number)
+        .sort((a, b) => a - b);
+
+      if (numeros.length === 0) {
+        criarBoxGrafico("Aguardando dados das plantas", "graficoVazio");
+        graficos.push(criarGrafico("graficoVazio", [
+          criarDataset("Sem dados", [])
+        ]));
+        return;
+      }
+
+      if (visualizacaoPorPlanta) {
+        numeros.forEach(numero => {
+          criarBoxGrafico(`Planta ${numero} - Umidade do Solo e Luminosidade`, `graficoPlanta${numero}`);
+
+          graficos.push(criarGrafico(`graficoPlanta${numero}`, [
+            criarDataset(`Planta ${numero} • Umidade do solo`, dados.plantas[numero].umidade_solo),
+            criarDataset(`Planta ${numero} • LDR %`, dados.plantas[numero].ldr)
+          ]));
+        });
+
+        criarBoxGrafico("DHT22 - Temperatura e Umidade do Ar", "graficoDHT");
+        graficos.push(criarGrafico("graficoDHT", [
+          criarDataset("Temperatura °C", dados.temperatura),
+          criarDataset("Umidade do ar %", dados.umidade_ar)
+        ]));
+      } else {
+        criarBoxGrafico("Sensores de Umidade do Solo", "graficoSolo");
+        criarBoxGrafico("Sensores de Luminosidade LDR (%)", "graficoLDR");
+        criarBoxGrafico("DHT22 - Temperatura e Umidade do Ar", "graficoDHT");
+
+        graficos.push(criarGrafico("graficoSolo", numeros.map(numero =>
+          criarDataset(`Planta ${numero} • Umidade do solo`, dados.plantas[numero].umidade_solo)
+        )));
+
+        graficos.push(criarGrafico("graficoLDR", numeros.map(numero =>
+          criarDataset(`Planta ${numero} • LDR %`, dados.plantas[numero].ldr)
+        ), 100));
+
+        graficos.push(criarGrafico("graficoDHT", [
+          criarDataset("Temperatura °C", dados.temperatura),
+          criarDataset("Umidade do ar %", dados.umidade_ar)
+        ]));
+      }
+    }
+
+    function criarDataset(label, data) {
+      return {
+        label: label,
+        data: data,
+        borderWidth: 2,
+        tension: 0.35,
+        fill: false,
+        pointRadius: 3,
+        pointHoverRadius: 6
+      };
+    }
+
+    function criarGrafico(idCanvas, datasets, maximoY = null) {
+      const ctx = document.getElementById(idCanvas).getContext("2d");
+
+      return new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: dados.labels,
+          datasets: datasets
+        },
+        options: {
+          responsive: true,
+          animation: false,
+          maintainAspectRatio: false,
+          interaction: {
+            mode: "index",
+            intersect: false
+          },
+          plugins: {
+            legend: {
+              position: "top",
+              labels: {
+                color: "rgba(239, 255, 248, 0.86)",
+                usePointStyle: true,
+                boxWidth: 8,
+                padding: 18
+              }
+            },
+            tooltip: {
+              backgroundColor: "rgba(6, 29, 47, 0.92)",
+              borderColor: "rgba(255, 255, 255, 0.22)",
+              borderWidth: 1,
+              titleColor: "#ffffff",
+              bodyColor: "#effff8"
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              max: maximoY,
+              grid: {
+                color: "rgba(255, 255, 255, 0.11)"
+              },
+              ticks: {
+                color: "rgba(239, 255, 248, 0.72)"
+              }
+            },
+            x: {
+              grid: {
+                color: "rgba(255, 255, 255, 0.08)"
+              },
+              ticks: {
+                color: "rgba(239, 255, 248, 0.72)",
+                maxRotation: 45,
+                minRotation: 0
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function atualizarGraficos() {
+      graficos.forEach(grafico => grafico.update());
+    }
+
+    atualizarCards();
+    montarGraficos();
+  </script>
+</body>
+</html>
